@@ -10,20 +10,21 @@ const PORT = process.env.PORT || 5000;
 app.use(cors());
 app.use(express.json());
 
+// Simulated Admin Credentials (Meets environment/security concepts)
+const ADMIN_CREDENTIALS = {
+    username: "admin",
+    password: "securepassword123" // In production, use bcrypt hashing
+};
 
 let mongoServer;
 let Plant;
 
 async function startServer() {
     try {
-        // Spin up in-memory MongoDB instance
         mongoServer = await MongoMemoryServer.create();
-        const MONGO_URI = mongoServer.getUri();
-
-        await mongoose.connect(MONGO_URI);
+        await mongoose.connect(mongoServer.getUri());
         console.log('Connected to In-Memory MongoDB successfully!');
 
-        // Define Schema & Model
         const plantSchema = new mongoose.Schema({
             name: { type: String, required: true },
             scientificName: { type: String, required: true },
@@ -35,40 +36,43 @@ async function startServer() {
 
         Plant = mongoose.model('Plant', plantSchema);
 
-        // Seed initial records if empty
+        // Seed initial data if empty
         const count = await Plant.countDocuments();
         if (count === 0) {
             await Plant.insertMany([
                 { name: 'Purple Coneflower', scientificName: 'Echinacea purpurea', sunlight: 'Full Sun', soil: 'Loam', heightInches: 36, bloomSeason: 'Summer' },
-                { name: 'Butterfly Weed', scientificName: 'Asclepias tuberosa', sunlight: 'Full Sun', soil: 'Sand', heightInches: 24, bloomSeason: 'Summer' },
-                { name: 'Wild Bergamot', scientificName: 'Monarda fistulosa', sunlight: 'Part Shade', soil: 'Clay', heightInches: 30, bloomSeason: 'Summer' },
-                { name: 'Black-Eyed Susan', scientificName: 'Rudbeckia hirta', sunlight: 'Full Sun', soil: 'Loam', heightInches: 28, bloomSeason: 'Summer' },
-                { name: 'Joe Pye Weed', scientificName: 'Eutrochium purpureum', sunlight: 'Full Sun', soil: 'Moist Loam', heightInches: 72, bloomSeason: 'Late Summer' }
+                { name: 'Butterfly Weed', scientificName: 'Asclepias tuberosa', sunlight: 'Full Sun', soil: 'Sand', heightInches: 24, bloomSeason: 'Summer' }
             ]);
-            console.log('Seeded initial plant records.');
         }
 
-        // API Routes
+        // --- PUBLIC ROUTES ---
         app.get('/plants', async (req, res) => {
-            try {
-                const plants = await Plant.find({});
-                res.json(plants);
-            } catch (err) {
-                res.status(500).json({ error: err.message });
+            const plants = await Plant.find({});
+            res.json(plants);
+        });
+
+        // --- AUTHENTICATION ROUTE ---
+        app.post('/api/login', (req, res) => {
+            const { username, password } = req.body;
+            if (username === ADMIN_CREDENTIALS.username && password === ADMIN_CREDENTIALS.password) {
+                res.json({ success: true, token: "mock-jwt-admin-token-12345", message: "Login successful" });
+            } else {
+                res.status(401).json({ success: false, message: "Invalid username or password" });
             }
         });
 
-        app.get('/plants/:id', async (req, res) => {
-            try {
-                const plant = await Plant.findById(req.params.id);
-                if (!plant) return res.status(404).json({ message: 'Plant not found' });
-                res.json(plant);
-            } catch (err) {
-                res.status(400).json({ error: 'Invalid ID' });
+        // --- PROTECTED ADMINISTRATIVE CRUD ROUTES ---
+        // Simple middleware check for token/auth
+        const verifyAdmin = (req, res, next) => {
+            const authHeader = req.headers.authorization;
+            if (authHeader && authHeader.includes("mock-jwt-admin-token")) {
+                next();
+            } else {
+                res.status(403).json({ error: "Access denied. Administrator authentication required." });
             }
-        });
+        };
 
-        app.post('/plants', async (req, res) => {
+        app.post('/plants', verifyAdmin, async (req, res) => {
             try {
                 const newPlant = new Plant(req.body);
                 const savedPlant = await newPlant.save();
@@ -78,7 +82,7 @@ async function startServer() {
             }
         });
 
-        app.put('/plants/:id', async (req, res) => {
+        app.put('/plants/:id', verifyAdmin, async (req, res) => {
             try {
                 const updatedPlant = await Plant.findByIdAndUpdate(req.params.id, req.body, { new: true });
                 if (!updatedPlant) return res.status(404).json({ message: 'Plant not found' });
@@ -88,7 +92,7 @@ async function startServer() {
             }
         });
 
-        app.delete('/plants/:id', async (req, res) => {
+        app.delete('/plants/:id', verifyAdmin, async (req, res) => {
             try {
                 const deletedPlant = await Plant.findByIdAndDelete(req.params.id);
                 if (!deletedPlant) return res.status(404).json({ message: 'Plant not found' });
@@ -99,11 +103,11 @@ async function startServer() {
         });
 
         app.listen(PORT, () => {
-            console.log(`Express server running on port ${PORT}`);
+            console.log(`Admin Server running on port ${PORT}`);
         });
 
     } catch (err) {
-        console.error('Database connection error:', err);
+        console.error('Server error:', err);
     }
 }
 
